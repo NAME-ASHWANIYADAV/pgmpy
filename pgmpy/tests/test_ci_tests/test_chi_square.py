@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 from pgmpy.ci_tests import ChiSquare
 
@@ -104,3 +105,49 @@ def test_exactly_same_vars():
     test("x", "y", [])
     assert test.dof_ == 1
     assert test.p_value_ == pytest.approx(0, abs=1e-2)
+
+
+def test_zero_dof_returns_independent():
+    # Regression test for #2886 / #2860: every stratum of Z collapses to a
+    # single active row or column, so the total dof is 0 and there is nothing
+    # to test against.
+    df = pd.DataFrame({"X": [0, 0, 1, 1], "Y": [0, 1, 0, 1], "Z": [0, 1, 0, 1]})
+
+    test = ChiSquare(data=df)
+    assert test("X", "Y", ["Z"])
+    assert test.statistic_ == 0.0
+    assert test.dof_ == 0
+    assert test.p_value_ == 1.0
+
+    # The marginal test on the same data is a regular non-degenerate 2x2 table.
+    assert test("X", "Y", [])
+    assert test.statistic_ == 0.0
+    assert test.dof_ == 1
+    assert test.p_value_ == pytest.approx(1.0)
+
+
+def test_state_absent_in_stratum():
+    # X=2 never occurs in the Z=1 stratum. The full-size tables built over the
+    # global states of X and Y (#2886) must match a per-stratum scipy
+    # computation on compacted tables, with dof counting only active
+    # rows/columns.
+    df = pd.DataFrame(
+        {
+            "X": [0, 0, 1, 1, 2, 2, 0, 0, 1, 1],
+            "Y": [0, 1, 0, 1, 0, 0, 0, 1, 1, 1],
+            "Z": [0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+        }
+    )
+
+    test = ChiSquare(data=df)
+    test.run_test("X", "Y", ["Z"])
+
+    expected_stat, expected_dof = 0.0, 0
+    for _, stratum in df.groupby("Z"):
+        c, _, d, _ = stats.chi2_contingency(pd.crosstab(stratum["X"], stratum["Y"]))
+        expected_stat += c
+        expected_dof += d
+
+    assert test.dof_ == expected_dof == 3
+    assert test.statistic_ == pytest.approx(expected_stat)
+    assert np.isfinite(test.p_value_)

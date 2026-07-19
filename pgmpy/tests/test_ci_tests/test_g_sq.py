@@ -36,3 +36,33 @@ def test_exactly_same_vars():
     test("x", "y", [])
     assert test.dof_ == 1
     assert test.p_value_ == pytest.approx(0, abs=1e-2)
+
+
+def test_zero_dof_returns_independent():
+    # Regression test for #2886 / #2860 through the log-likelihood branch.
+    df = pd.DataFrame({"X": [0, 0, 1, 1], "Y": [0, 1, 0, 1], "Z": [0, 1, 0, 1]})
+
+    test = GSq(data=df)
+    assert test("X", "Y", ["Z"])
+    assert test.statistic_ == 0.0
+    assert test.dof_ == 0
+    assert test.p_value_ == 1.0
+
+
+def test_empty_stratum_finite():
+    # (A, B) = (1, 1) never occurs, so the conditioning product space contains
+    # an empty stratum. The xlogy-based statistic must stay finite.
+    df = pd.DataFrame(
+        {
+            "X": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+            "Y": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+            "A": [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0],
+            "B": [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1],
+        }
+    )
+
+    test = GSq(data=df)
+    test.run_test("X", "Y", ["A", "B"])
+    assert np.isfinite(test.statistic_)
+    assert test.dof_ == 3
+    assert test.p_value_ == pytest.approx(1.0)

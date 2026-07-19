@@ -52,7 +52,10 @@ class PowerDivergence(BaseCITest):
 
     **1. Adjusted (sparse) degrees of freedom.** A row or column that never occurs in a stratum contributes zero to both
     :math:`\nu^{(z)}` and :math:`T_\lambda^{(z)}` (its expected counts are zero, so its per-cell terms vanish). A
-    stratum that collapses to a single active row or column has :math:`\nu^{(z)} = 0` and is effectively skipped.
+    stratum that collapses to a single active row or column has :math:`\nu^{(z)} = 0` and is effectively skipped, as are
+    strata with no observations at all. If every stratum is degenerate (:math:`\nu = 0`), there is nothing to test
+    against and the p-value is 1 (independence), consistent with :func:`scipy.stats.chi2_contingency`, bnlearn's
+    ``mi-adf``/``x2-adf`` tests, and causal-learn.
 
     **2. Yates' continuity correction on 2x2 strata.** Whenever a stratum's active contingency table is 2x2
     (equivalently, :math:`\nu^{(z)} = 1`), Yates' continuity correction is applied to the observed counts before
@@ -180,7 +183,9 @@ class PowerDivergence(BaseCITest):
         col_sums = observed.sum(axis=1, keepdims=True)
         n_per = observed.sum(axis=(1, 2), keepdims=True)
         with np.errstate(invalid="ignore"):
-            expected = row_sums * col_sums / n_per
+            expected = np.where(n_per > 0, row_sums * col_sums / n_per, 0.0)
+        # Empty strata get expected=0 (not NaN), so safe excludes them just
+        # like zero-margin cells; otherwise the xlogy-based lambdas turn NaN.
         safe = expected > 0
 
         # Step 4: Per-stratum dof = (active_rows - 1) * (active_cols - 1).
@@ -196,11 +201,13 @@ class PowerDivergence(BaseCITest):
             adjustment = np.minimum(0.5, np.abs(diff)) * np.sign(diff)
             observed = np.where(correction_mask, observed + adjustment, observed)
 
-        # Step 6: Power-divergence statistic and p-value. dof=0 (every stratum
-        # degenerate) yields p_value=NaN, treated as "not independent" downstream.
+        # Step 6: Power-divergence statistic and p-value. When every stratum
+        # is degenerate (dof=0) there is nothing to test against, so return
+        # p=1.0 (independent), matching scipy.stats.chi2_contingency, bnlearn
+        # (mi-adf), and causal-learn.
         terms = self._power_divergence_terms(observed, expected, safe)
         chi = terms.sum()
-        p_value = stats.chi2.sf(chi, df=dof)
+        p_value = 1.0 if dof == 0 else stats.chi2.sf(chi, df=dof)
 
         n = len(self.data)
         k = min(self._cardinalities[X], self._cardinalities[Y])

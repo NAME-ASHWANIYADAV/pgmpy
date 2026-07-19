@@ -37,3 +37,22 @@ def test_exactly_same_vars():
     test("x", "y", [])
     assert test.dof_ == 1
     assert test.p_value_ == pytest.approx(0, abs=1e-2)
+
+
+def test_empty_stratum_finite():
+    # (A, B) = (1, 1) never occurs, so the conditioning product space contains
+    # an empty stratum. The xlogy-based statistic must stay finite.
+    df = pd.DataFrame(
+        {
+            "X": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+            "Y": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+            "A": [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0],
+            "B": [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1],
+        }
+    )
+
+    test = ModifiedLogLikelihood(data=df)
+    test.run_test("X", "Y", ["A", "B"])
+    assert np.isfinite(test.statistic_)
+    assert test.dof_ == 3
+    assert test.p_value_ == pytest.approx(1.0)
